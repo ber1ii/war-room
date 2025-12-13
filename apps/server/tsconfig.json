@@ -1,0 +1,21 @@
+{
+  "compilerOptions": {
+    /* Base Options: */
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "target": "es2022",
+    "verbatimModuleSyntax": false,
+    "allowSyntheticDefaultImports": true,
+    "forceConsistentCasingInFileNames": true,
+    "strict": true,
+
+    /* Modules Resolution Options: */
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+
+    /* Output Options: */
+    "outDir": "./dist",
+    "rootDir": "./"
+  },
+  "include": ["."]
+}

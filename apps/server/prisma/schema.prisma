@@ -1,0 +1,40 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")  // <-- We are putting this back!
+  directUrl = env("DIRECT_URL")    // <-- And this!
+}
+
+model Incident {
+  id              String   @id @default(uuid())
+  title           String
+  isActive        Boolean  @default(true)
+  severity        String
+  createdAt       DateTime @default(now())
+
+  events          IncidentEvent[]
+  checklistItems  ChecklistItem[]
+}
+
+model IncidentEvent {
+  id         String   @id @default(uuid())
+  incidentId String
+  text       String
+  userId     String
+  type       String
+  createdAt  DateTime @default(now())
+
+  incident   Incident @relation(fields: [incidentId], references: [id])
+}
+
+model ChecklistItem {
+  id          String  @id @default(uuid())
+  incidentId  String
+  text        String
+  isCompleted Boolean @default(false)
+
+  incident    Incident @relation(fields: [incidentId], references: [id])
+}
