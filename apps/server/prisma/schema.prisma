@@ -15,6 +15,8 @@ model Incident {
   severity        String
   createdAt       DateTime @default(now())
 
+  createdBy       String   @default("Unknown")
+
   events          IncidentEvent[]
   checklistItems  ChecklistItem[]
 }

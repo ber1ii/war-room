@@ -4,6 +4,7 @@ import http from "http";
 import { Server, Socket } from "socket.io";
 import cors from "cors";
 import { TEST_VAR } from "@war-room/shared";
+import { error } from "console";
 
 const prisma = new PrismaClient();
 
@@ -48,13 +49,14 @@ setInterval(() => {
 }, 5000);
 
 app.post("/incidents", async (req, res) => {
-  const { title, severity } = req.body;
+  const { title, severity, createdBy } = req.body;
 
   try {
     const incident = await prisma.incident.create({
       data: {
         title,
         severity,
+        createdBy,
         isActive: true,
       },
     });
@@ -111,24 +113,105 @@ app.get("/incidents/:id/messages", async (req, res) => {
 });
 
 app.get("/incidents/:id/checklist", async (req, res) => {
+  const incidentId = req.params.id;
+
+  const incidentExists = await prisma.incident.findUnique({
+    where: { id: incidentId },
+  });
+
+  if (!incidentExists) {
+    return res.status(404).json({ error: "Incident not found" });
+  }
+
   const items = await prisma.checklistItem.findMany({
-    where: { incidentId: req.params.id },
+    where: { incidentId },
     orderBy: { text: "asc" },
   });
 
   if (items.length === 0) {
     const defaults = ["Assign Lead", "Isolate Service", "Check Logs", "Notify Stakeholders"];
-    const created = await Promise.all(
-      defaults.map((text) =>
-        prisma.checklistItem.create({
-          data: { incidentId: req.params.id, text },
-        }),
-      ),
-    );
-    return res.json(created);
+    try {
+      const created = await Promise.all(
+        defaults.map((text) =>
+          prisma.checklistItem.create({
+            data: { incidentId: req.params.id, text },
+          }),
+        ),
+      );
+      return res.json(created);
+    } catch (e) {
+      return res.status(500).json({ error: "Failed to seed checklist" });
+    }
   }
   res.json(items);
 });
+
+app.get("/incidents/:id", async (req, res) => {
+  const incident = await prisma.incident.findUnique({
+    where: { id: req.params.id },
+  });
+  res.json(incident);
+});
+
+interface SystemVitals {
+  cpu: number;
+  memory: number;
+  latency: number;
+  db_iops: number;
+  cache_hit: number;
+  active_threads: number;
+  error_rate: number;
+  status: "NOMINAL" | "WARNING" | "CRITICAL";
+  alert?: string;
+}
+
+// Heartbeat engine
+setInterval(() => {
+  const chaosRoll = Math.random();
+  let mode: "NOMINAL" | "SPIKE_CPU" | "CACHE_DUMP" | "DB_LOCK" = "NOMINAL";
+
+  if (chaosRoll > 0.995) mode = "SPIKE_CPU";
+  else if (chaosRoll > 0.99) mode = "CACHE_DUMP";
+  else if (chaosRoll > 0.985) mode = "DB_LOCK";
+
+  let vitals: SystemVitals = {
+    cpu: 25 + Math.random() * 15,
+    memory: 40 + Math.random() * 10,
+    latency: 15 + Math.random() * 10,
+    db_iops: 400 + Math.floor(Math.random() * 200),
+    cache_hit: 95 + Math.random() * 4,
+    active_threads: 120 + Math.floor(Math.random() * 30),
+    error_rate: Math.random() * 0.5,
+    status: "NOMINAL",
+  };
+
+  switch (mode) {
+    case "SPIKE_CPU":
+      vitals.cpu = 85 + Math.random() * 14;
+      vitals.active_threads += 400;
+      vitals.status = "CRITICAL";
+      vitals.alert = "CPU_THROTTLING_DETECTED";
+      break;
+
+    case "CACHE_DUMP":
+      vitals.cache_hit = Math.random() * 20;
+      vitals.latency += 200;
+      vitals.db_iops += 2000;
+      vitals.status = "WARNING";
+      vitals.alert = "REDIS_CONNECTION_UNSTABLE";
+      break;
+
+    case "DB_LOCK":
+      vitals.db_iops = 0;
+      vitals.active_threads += 1000;
+      vitals.error_rate = 5 + Math.random() * 10;
+      vitals.status = "CRITICAL";
+      vitals.alert = "DEADLOCK_DEDECTED_IN_PRIMARY_DB";
+      break;
+  }
+
+  io.emit("system_vitals", vitals);
+}, 2000);
 
 io.on("connection", (socket: Socket) => {
   console.log("User connected: ", socket.id);
@@ -224,6 +307,17 @@ io.on("connection", (socket: Socket) => {
       op.lastActive = Date.now();
       broadcastRadar();
     }
+  });
+
+  socket.on("update_severity", async (data) => {
+    const { roomId, severity } = data;
+
+    await prisma.incident.update({
+      where: { id: roomId },
+      data: { severity },
+    });
+
+    io.to(roomId).emit("severity_update", severity);
   });
 
   socket.on("disconnect", () => {
