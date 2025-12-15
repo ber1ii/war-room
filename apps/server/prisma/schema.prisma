@@ -4,14 +4,14 @@ generator client {
 
 datasource db {
   provider  = "postgresql"
-  url       = env("DATABASE_URL")  // <-- We are putting this back!
-  directUrl = env("DIRECT_URL")    // <-- And this!
+  url       = env("DATABASE_URL")  
+  directUrl = env("DIRECT_URL")   
 }
 
 model Incident {
   id              String   @id @default(uuid())
   title           String
-  isActive        Boolean  @default(true)
+  status          String   @default("OPEN")
   severity        String
   createdAt       DateTime @default(now())
 
@@ -19,6 +19,8 @@ model Incident {
 
   events          IncidentEvent[]
   checklistItems  ChecklistItem[]
+  snippet         Snippet[]
+  secret          Secret[]
 }
 
 model IncidentEvent {
@@ -29,7 +31,7 @@ model IncidentEvent {
   type       String
   createdAt  DateTime @default(now())
 
-  incident   Incident @relation(fields: [incidentId], references: [id])
+  incident   Incident @relation(fields: [incidentId], references: [id], onDelete: Cascade)
 }
 
 model ChecklistItem {
@@ -38,5 +40,34 @@ model ChecklistItem {
   text        String
   isCompleted Boolean @default(false)
 
-  incident    Incident @relation(fields: [incidentId], references: [id])
+  incident    Incident @relation(fields: [incidentId], references: [id], onDelete: Cascade)
+}
+
+model Snippet {
+  id         String   @id @default(uuid())
+  title      String
+  language   String   @default("javascript")
+  code       String
+  
+  // Lock Mechanic
+  lockedBy   String?  // Username of the editor
+  lockedAt   DateTime?
+
+  incidentId String
+  incident   Incident @relation(fields: [incidentId], references: [id], onDelete: Cascade)
+
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}
+
+model Secret {
+  id         String   @id @default(uuid())
+  incidentId String
+  label      String   // e.g. "AWS Root Key"
+  value      String   // The actual secret
+  createdAt  DateTime @default(now())
+  expiresAt  DateTime // Self-destruct time
+  viewedBy   String[] // Array of usernames who clicked reveal
+
+  incident   Incident @relation(fields: [incidentId], references: [id], onDelete: Cascade)
 }
