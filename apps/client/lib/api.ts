@@ -1,6 +1,7 @@
 import { supabase } from "./supabase";
 
-const API_BASE = "http://localhost:4000/api";
+const BASE_URL = process.env.NEXT_PUBLIC_SOCKET_URL || "http://localhost:4000";
+const API_BASE = `${BASE_URL}/api`;
 
 async function getHeaders() {
   const {
