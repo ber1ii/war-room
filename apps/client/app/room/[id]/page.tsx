@@ -9,7 +9,6 @@ import { Badge } from "@/components/ui/badge";
 import { supabase } from "@/lib/supabase";
 import { useSfx } from "@/hooks/use-sfx";
 import CodeEditor from "@/components/code-editor";
-import Link from "next/link";
 import { api } from "@/lib/api";
 import SystemVitalsWidget from "@/components/system-vitals";
 import { GitHubLogoIcon, TrashIcon, CheckCircledIcon } from "@radix-ui/react-icons";
@@ -17,6 +16,7 @@ import BlackBox from "@/components/black-box";
 import { motion, useAnimation } from "framer-motion";
 import Armory from "@/components/armory";
 import Terminal from "@/components/terminal";
+import { getSocketUrl, socketConfig } from "@/lib/socket-config";
 
 interface RoomPageProps {
   params: Promise<{ id: string }>;
@@ -94,132 +94,159 @@ export default function IncidentRoom({ params }: RoomPageProps) {
 
   // Data Fetching & Socket Connection
   useEffect(() => {
-    const fetchHistory = async () => {
-      try {
-        const msgData = (await api.get(`/incidents/${incidentId}/messages`)) as DBMessage[];
-        const history = msgData.map((event) => ({
-          text: event.text,
-          sender: event.userId,
-          timestamp: new Date(event.createdAt).toLocaleTimeString(),
-        }));
-        setMessages(history);
+    let activeSocket: Socket | null = null;
+    let isMounted = true;
 
-        const checkData = await api.get(`/incidents/${incidentId}/checklist`);
-        if (Array.isArray(checkData)) {
-          setChecklist(checkData);
-        }
+    const initDataAndSocket = async () => {
+      // --- A. Data Fetching (Keep your existing logic) ---
+      if (incidentId) {
+        try {
+          const msgData = (await api.get(`/incidents/${incidentId}/messages`)) as DBMessage[];
+          if (!isMounted) return;
+          const history = msgData.map((event) => ({
+            text: event.text,
+            sender: event.userId,
+            timestamp: new Date(event.createdAt).toLocaleTimeString(),
+          }));
+          setMessages(history);
 
-        const sevData = await api.get<DBIncident>(`/incidents/${incidentId}`);
-        if (sevData) {
-          setSeverity(sevData.severity);
-          setCreator(sevData.createdBy);
-          setTitle(sevData.title);
+          const checkData = await api.get(`/incidents/${incidentId}/checklist`);
+          if (Array.isArray(checkData)) setChecklist(checkData);
+
+          const sevData = await api.get<DBIncident>(`/incidents/${incidentId}`);
+          if (sevData) {
+            setSeverity(sevData.severity);
+            setCreator(sevData.createdBy);
+            setTitle(sevData.title);
+          }
+        } catch (e) {
+          console.error("Failed to fetch history:", e);
         }
-      } catch (e) {
-        console.error("Failed to fetch history:", e);
       }
-    };
 
-    if (incidentId) fetchHistory();
+      // --- B. Socket Connection ---
+      const session = await supabase.auth.getSession();
 
-    const newSocket = io("http://localhost:4000");
-    setSocket(newSocket);
+      if (!isMounted) return;
 
-    const identifyAndJoin = async () => {
+      const token = session.data.session?.access_token;
+
+      if (!token) return;
+
+      // Create the socket
+      activeSocket = io(getSocketUrl(), {
+        auth: { token },
+        ...socketConfig,
+      });
+
+      if (!isMounted) {
+        activeSocket.disconnect();
+        return;
+      }
+
+      // Update React State
+      setSocket(activeSocket);
+
+      // --- C. Socket Listeners ---
+
+      activeSocket.on("connect", () => {
+        console.log("Connected to ID:", incidentId);
+        if (isMounted) setIsConnected(true);
+      });
+
+      activeSocket.on("disconnect", () => {
+        setIsConnected(false);
+      });
+
+      activeSocket.on("connect_error", (err) => {
+        console.error("Socket Connection Error:", err.message);
+        setIsConnected(false);
+      });
+
+      activeSocket.on("message", (msg: Message) => {
+        setMessages((prev) => [...prev, msg]);
+        if (msg.sender !== username) playMessage();
+      });
+
+      activeSocket.on("checklist_update", (data) => {
+        setChecklist((prev) =>
+          prev.map((item) =>
+            item.id === data.itemId ? { ...item, isCompleted: data.isCompleted } : item,
+          ),
+        );
+      });
+
+      activeSocket.on("new_checklist_item", (item) => {
+        setChecklist((prev) => {
+          if (prev.some((i) => i.id === item.id)) return prev;
+          return [...prev, item];
+        });
+      });
+
+      activeSocket.on("display_typing", (user) =>
+        setTypingUsers((prev) => new Set(prev).add(user)),
+      );
+      activeSocket.on("hide_typing", (user) => {
+        setTypingUsers((prev) => {
+          const newSet = new Set(prev);
+          newSet.delete(user);
+          return newSet;
+        });
+      });
+
+      activeSocket.on("severity_update", (newSev) => {
+        setSeverity(newSev);
+        playSuccess();
+      });
+
+      activeSocket.on("incident_resolved", () => {
+        setStatus("RESOLVED");
+        playSuccess();
+        alert("INCIDENT RESOLVED. COMMAND STANDING DOWN");
+        setTimeout(() => router.push("/"), 1200);
+      });
+
+      activeSocket.on("incident_deleted", () => {
+        alert("INCIDENT LOGS PURGED. RETURNING TO HQ.");
+        router.push("/");
+      });
+
+      activeSocket.on("visual_effect", (effect) => {
+        if (effect === "shake") {
+          controls.start({
+            x: [0, -5, 5, -5, 5, 0],
+            y: [0, -5, 5, 0],
+            transition: { duration: 0.5, ease: "easeInOut" },
+          });
+        }
+      });
+
+      activeSocket.on("play_sound", (type) => {
+        if (type === "success") playSuccess();
+      });
+
+      // Emits for joining
       const {
         data: { user },
       } = await supabase.auth.getUser();
-
-      if (user && newSocket) {
-        const name = user.user_metadata?.username || user.email?.split("@")[0];
-        newSocket.emit("identify_operative", { username: name });
-        newSocket.emit("join_room", incidentId);
+      if (user && activeSocket.connected) {
+        // Server now auto-identifies from token, but we still need to join the room
+        activeSocket.emit("join_room", incidentId);
       }
     };
 
-    newSocket.on("connect", () => {
-      console.log("Connected to ID:", incidentId);
-      setIsConnected(true);
-      identifyAndJoin();
-    });
+    initDataAndSocket();
 
-    newSocket.on("message", (msg: Message) => {
-      setMessages((prev) => [...prev, msg]);
-      if (msg.sender !== username) {
-        playMessage();
-      }
-    });
-
-    newSocket.on("checklist_update", (data: { itemId: string; isCompleted: boolean }) => {
-      setChecklist((prev) =>
-        prev.map((item) =>
-          item.id === data.itemId ? { ...item, isCompleted: data.isCompleted } : item,
-        ),
-      );
-    });
-
-    newSocket.on("new_checklist_item", (item: ChecklistItem) => {
-      setChecklist((prev) => {
-        if (prev.some((i) => i.id === item.id)) return prev;
-        return [...prev, item];
-      });
-    });
-
-    newSocket.on("display_typing", (user: string) => {
-      setTypingUsers((prev) => {
-        const newSet = new Set(prev);
-        newSet.add(user);
-        return newSet;
-      });
-    });
-
-    newSocket.on("hide_typing", (user: string) => {
-      setTypingUsers((prev) => {
-        const newSet = new Set(prev);
-        newSet.delete(user);
-        return newSet;
-      });
-    });
-
-    newSocket.on("severity_update", (newSev: string) => {
-      setSeverity(newSev);
-      playSuccess();
-    });
-
-    newSocket.on("incident_resolved", () => {
-      setStatus("RESOLVED");
-      playSuccess();
-      alert("INCIDENT RESOLVED. COMMAND STANDING DOWN");
-
-      setTimeout(() => {
-        router.push("/");
-      }, 1200);
-    });
-
-    newSocket.on("incident_deleted", () => {
-      alert("INCIDENT LOGS PURGED. RETURNING TO HQ.");
-      router.push("/");
-    });
-
-    newSocket.on("visual_effect", (effect: string) => {
-      if (effect === "shake") {
-        controls.start({
-          x: [0, -5, 5, -5, 5, 0],
-          y: [0, -5, 5, 0],
-          transition: { duration: 0.5, ease: "easeInOut" },
-        });
-      }
-    });
-
-    newSocket.on("play_sound", (type: string) => {
-      if (type === "success") playSuccess();
-    });
-
+    // 4. CLEANUP FUNCTION
     return () => {
-      newSocket.disconnect();
+      isMounted = false;
+      if (activeSocket) {
+        console.log("Cleaning up socket connection...");
+        activeSocket.disconnect();
+      }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [incidentId, playMessage, playSuccess]);
+  }, [incidentId]);
 
   // Chat Function
   const sendMessage = () => {
@@ -337,15 +364,14 @@ export default function IncidentRoom({ params }: RoomPageProps) {
       <div className="flex justify-between items-center pb-2 border-b border-gray-800 shrink-0">
         <div className="space-y-1">
           <div className="flex items-center gap-2 mb-1">
-            <Link href="/">
-              <Button
-                variant="ghost"
-                size="sm"
-                className="text-muted-foreground hover:text-cyan-400 pl-0 -ml-2"
-              >
-                ⤶ Return to Base
-              </Button>
-            </Link>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => router.push("/")}
+              className="text-muted-foreground hover:text-cyan-400 pl-0 -ml-2 z-50 relative"
+            >
+              ⤶ Return to Base
+            </Button>
           </div>
           <h1 className="text-3xl font-bold tracking-tight text-cyan-400">
             {title || "Incident Room"}

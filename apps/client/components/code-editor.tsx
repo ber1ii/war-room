@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef, act, use } from "react";
-import Editor, { OnChange } from "@monaco-editor/react";
+import Editor, { OnChange, OnMount } from "@monaco-editor/react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardHeader, CardTitle } from "@/components/ui/card";
@@ -41,6 +41,28 @@ export default function CodeEditor({ incidentId, username, socket, className }: 
     activeSnippetRef.current = activeSnippet;
   }, [activeSnippet]);
 
+  const handleEditorDidMount: OnMount = (editor, monaco) => {
+    monaco.languages.typescript.javascriptDefaults.setDiagnosticsOptions({
+      noSemanticValidation: false,
+      noSyntaxValidation: false,
+    });
+
+    monaco.languages.typescript.typescriptDefaults.setDiagnosticsOptions({
+      noSemanticValidation: false,
+      noSyntaxValidation: false,
+    });
+
+    monaco.languages.typescript.javascriptDefaults.setCompilerOptions({
+      target: monaco.languages.typescript.ScriptTarget.ESNext,
+      allowNonTsExtensions: true,
+      checkJs: true,
+      allowJs: true,
+      noUnusedLocals: true,
+      noUnusedParameters: true,
+      strict: true,
+    });
+  };
+
   const detectLanguage = (filename: string) => {
     if (!filename) return "javascript";
     const lower = filename.toLowerCase();
@@ -57,7 +79,7 @@ export default function CodeEditor({ incidentId, username, socket, className }: 
   const fetchSnippets = useCallback(async () => {
     if (!incidentId) return;
     try {
-      const data = await api.get(`/incidents/${incidentId}/snippets`);
+      const data = await api.get<Snippet[]>(`/incidents/${incidentId}/snippets`);
       setSnippets(data);
 
       const currentActive = activeSnippetRef.current;
@@ -403,9 +425,10 @@ export default function CodeEditor({ incidentId, username, socket, className }: 
                 )}
                 <Editor
                   height="100%"
-                  language={currentLanguage} // <--- DYNAMIC LANGUAGE
+                  language={currentLanguage}
                   value={editorValue}
                   theme="vs-dark"
+                  onMount={handleEditorDidMount}
                   onChange={handleEditorChange}
                   options={{
                     readOnly: !isLockedByMe,
@@ -413,6 +436,7 @@ export default function CodeEditor({ incidentId, username, socket, className }: 
                     fontSize: 12,
                     fontFamily: "monospace",
                     quickSuggestions: true,
+                    renderValidationDecorations: "on",
                   }}
                 />
               </div>

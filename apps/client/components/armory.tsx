@@ -54,6 +54,13 @@ export default function Armory({
     };
   }, [incidentId, socket]);
 
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const now = new Date();
+      setSecrets((current) => current.filter((s) => new Date(s.expiresAt) > now));
+    }, 1000);
+  });
+
   const handleDeposit = async () => {
     if (!label || !value) return;
 
