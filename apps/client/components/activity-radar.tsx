@@ -79,7 +79,7 @@ export default function ActivityRadar() {
 
             console.log(`[Radar] Fetching title for: "${cleanId}" (Raw: "${rawLocation}")`);
 
-            const data = await api.get(`/incidents/${cleanId}`);
+            const data = (await api.get(`/incidents/${cleanId}`)) as { title: string };
 
             if (data && data.title) {
               newTitles[rawLocation] = data.title;
