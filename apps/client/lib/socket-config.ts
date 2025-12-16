@@ -10,5 +10,5 @@ export const getSocketUrl = () => {
 export const socketConfig = {
   reconnectionAttempts: 5,
   reconnectionDelay: 1000,
-  autoConnect: false,
+  autoConnect: true,
 };

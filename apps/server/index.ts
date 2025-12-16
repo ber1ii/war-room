@@ -11,7 +11,8 @@ import crypto from "crypto";
 import jwt from "jsonwebtoken";
 
 const PORT = process.env.PORT || 4000;
-const CLIENT_URL = process.env.CLIENT_URL || "http://localhost:3000";
+const rawClientUrl = process.env.CLIENT_URL || "http://localhost:3000";
+const CLIENT_URLS = rawClientUrl.split(",").map((url) => url.trim());
 const SUPABASE_REF = process.env.SUPABASE_PROJECT_REF;
 const SUPABASE_URL = `https://${SUPABASE_REF}.supabase.co`;
 const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY;
@@ -70,7 +71,7 @@ const GITHUB_REPO = process.env.GITHUB_REPO!;
 
 app.use(
   cors({
-    origin: CLIENT_URL,
+    origin: CLIENT_URLS,
     methods: ["GET", "POST", "PATCH", "DELETE"],
     allowedHeaders: ["Content-Type", "Authorization"],
   }),
@@ -359,7 +360,7 @@ app.use("/api", api);
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
-    origin: CLIENT_URL,
+    origin: CLIENT_URLS,
     methods: ["GET", "POST"],
   },
 });
