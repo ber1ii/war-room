@@ -385,7 +385,7 @@ export default function IncidentRoom({ params }: RoomPageProps) {
             <Button
               variant="ghost"
               size="sm"
-              onClick={() => router.push("/")}
+              onClick={() => (window.location.href = "/")}
               className="text-muted-foreground hover:text-cyan-400 pl-0 -ml-2 z-50 relative"
             >
               ⤶ Return to Base
