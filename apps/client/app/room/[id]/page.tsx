@@ -101,26 +101,33 @@ export default function IncidentRoom({ params }: RoomPageProps) {
       // --- A. Data Fetching (Keep your existing logic) ---
       if (incidentId) {
         try {
-          const msgData = (await api.get(`/incidents/${incidentId}/messages`)) as DBMessage[];
-          if (!isMounted) return;
-          const history = msgData.map((event) => ({
-            text: event.text,
-            sender: event.userId,
-            timestamp: new Date(event.createdAt).toLocaleTimeString(),
-          }));
-          setMessages(history);
+          const [msgData, checkData, sevData] = await Promise.all([
+            api.get<DBMessage[]>(`/incidents/${incidentId}/messages`),
+            api.get<ChecklistItem[]>(`/incidents/${incidentId}/checklist`),
+            api.get<DBIncident>(`/incidents/${incidentId}`),
+          ]);
 
-          const checkData = await api.get(`/incidents/${incidentId}/checklist`);
+          if (!isMounted) return;
+
+          if (Array.isArray(msgData)) {
+            const history = msgData.map((event) => ({
+              text: event.text,
+              sender: event.userId,
+              timestamp: new Date(event.createdAt).toLocaleTimeString(),
+              type: "message" as const,
+            }));
+            setMessages(history);
+          }
+
           if (Array.isArray(checkData)) setChecklist(checkData);
 
-          const sevData = await api.get<DBIncident>(`/incidents/${incidentId}`);
           if (sevData) {
             setSeverity(sevData.severity);
             setCreator(sevData.createdBy);
             setTitle(sevData.title);
           }
         } catch (e) {
-          console.error("Failed to fetch history:", e);
+          console.error("Failed to fetch initial data:", e);
         }
       }
 
@@ -152,6 +159,8 @@ export default function IncidentRoom({ params }: RoomPageProps) {
       activeSocket.on("connect", () => {
         console.log("Connected to ID:", incidentId);
         if (isMounted) setIsConnected(true);
+
+        activeSocket?.emit("join_room", incidentId);
       });
 
       activeSocket.on("disconnect", () => {
@@ -268,16 +277,25 @@ export default function IncidentRoom({ params }: RoomPageProps) {
     setCurrentMessage("");
   };
 
+  const lastTypingEmit = useRef<number>(0);
+
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setCurrentMessage(e.target.value);
     if (Math.random() > 0.5) playTyping();
 
     if (!socket) return;
 
-    socket.emit("typing", { roomId: incidentId, username });
+    const now = Date.now();
+    // Throttle: Only emit 'typing' if 2 seconds have passed since the last emit
+    if (now - lastTypingEmit.current > 2000) {
+      socket.emit("typing", { roomId: incidentId, username });
+      lastTypingEmit.current = now;
+    }
 
+    // Clear existing timeout
     if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
 
+    // Set timeout to stop typing after 2 seconds of inactivity
     typingTimeoutRef.current = setTimeout(() => {
       socket?.emit("stop_typing", { roomId: incidentId, username });
     }, 2000);

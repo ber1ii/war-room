@@ -179,6 +179,13 @@ export default function Terminal({ isOpen, onClose, socket, incidentId, username
           "LOCAL COMMANDS:",
           "  logo, matrix, whoami, clear, exit",
         ]);
+      } else if (cmd === "whoami") {
+        setHistory((prev) => [
+          ...prev,
+          `> OPERATIVE: ${username}`,
+          `> CLEARANCE: LEVEL 4 (CLASSIFIED)`,
+          `> SESSION_ID: ${socket?.id || "OFFLINE"}`,
+        ]);
       } else if (cmd.startsWith("/") || cmd === "ping" || cmd.startsWith("sudo")) {
         socket?.emit("terminal_command", { command: cmd, roomId: incidentId, username });
       } else {
