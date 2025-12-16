@@ -5,6 +5,7 @@ import { io, Socket } from "socket.io-client";
 import { supabase } from "@/lib/supabase";
 import { usePathname } from "next/navigation";
 import { api } from "@/lib/api";
+import { getSocketUrl } from "@/lib/socket-config";
 
 type Operative = {
   id: string;
@@ -23,31 +24,39 @@ export default function ActivityRadar() {
   const pathname = usePathname();
 
   useEffect(() => {
+    // 1. Don't run on auth pages
     if (pathname === "/login" || pathname === "/register") return;
 
-    socketRef.current = io("http://localhost:4000");
+    const connectRadar = async () => {
+      // 2. Get Session Token (Crucial for Server Auth)
+      const session = await supabase.auth.getSession();
+      const token = session.data.session?.access_token;
 
-    const identify = async () => {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
-      if (user && socketRef.current) {
-        const username = user.user_metadata?.username || user.email?.split("@")[0];
-        setMyUsername(username);
-        socketRef.current.emit("identify_operative", { username });
-      }
+      if (!token) return;
+
+      // 3. Connect using Dynamic URL + Token
+      socketRef.current = io(getSocketUrl(), {
+        auth: { token },
+        reconnectionAttempts: 5,
+      });
+
+      // 4. Set local username for UI highlighting
+      const user = session.data.session?.user;
+      const name = user?.user_metadata?.username || user?.email?.split("@")[0];
+      setMyUsername(name);
+
+      // 5. Listen for updates
+      socketRef.current.on("radar_update", (rawList: Operative[]) => {
+        setOperatives(rawList);
+      });
     };
 
-    socketRef.current.on("connect", () => {
-      identify();
-    });
-
-    socketRef.current.on("radar_update", (rawList: Operative[]) => {
-      setOperatives(rawList);
-    });
+    connectRadar();
 
     return () => {
-      socketRef.current?.disconnect();
+      if (socketRef.current) {
+        socketRef.current.disconnect();
+      }
     };
   }, [pathname]);
 
